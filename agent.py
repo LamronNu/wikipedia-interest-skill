@@ -1,9 +1,11 @@
 import os
+import pandas as pd
 from pathlib import Path
 
 from openai import OpenAI
 
 from scripts.wikipedia import get_pageviews
+from scripts.analyze import analyze_trend
 
 
 # --------------------------------------------------
@@ -65,7 +67,31 @@ tools = [
                 ],
             },
         },
-    }
+    },
+    {
+      "type": "function",
+      "function": {
+          "name": "analyze_trend",
+          "description": (
+              "Analyze Wikipedia pageview data and return basic "
+              "trend metrics such as percentage change, average, "
+              "median, maximum, minimum and overall trend."
+          ),
+          "parameters": {
+              "type": "object",
+              "properties": {
+                  "data": {
+                      "type": "string",
+                      "description": (
+                          "JSON string containing the pageview records "
+                          "returned by get_pageviews."
+                      )
+                  }
+              },
+              "required": ["data"],
+          },
+      },
+  }
 ]
 
 
@@ -133,6 +159,24 @@ if message.tool_calls:
                     "content": result_text,
                 }
             )
+        elif tool_call.function.name == "analyze_trend":
+              import json
+
+              arguments = json.loads(tool_call.function.arguments)
+
+              data = pd.read_json(arguments["data"])
+
+              result = analyze_trend(data)
+
+              result_text = json.dumps(result, ensure_ascii=False)
+
+              messages.append(
+                  {
+                      "role": "tool",
+                      "tool_call_id": tool_call.id,
+                      "content": result_text,
+                  }
+              )
 
 
     # --------------------------------------------------
