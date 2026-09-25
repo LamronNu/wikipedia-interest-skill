@@ -1,4 +1,5 @@
 import os
+import json
 import pandas as pd
 from pathlib import Path
 
@@ -6,6 +7,7 @@ from openai import OpenAI
 
 from scripts.wikipedia import get_pageviews
 from scripts.analyze import analyze_trend
+from scripts.charts import create_chart
 
 
 # --------------------------------------------------
@@ -14,6 +16,9 @@ from scripts.analyze import analyze_trend
 
 skill_path = Path("SKILL.md")
 skill = skill_path.read_text(encoding="utf-8")
+
+OUTPUT_DIR = "outputs"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 # --------------------------------------------------
@@ -29,6 +34,39 @@ client = OpenAI(
 # --------------------------------------------------
 # 3. Define the Wikipedia tool
 # --------------------------------------------------
+# datastore
+data_store = {}
+
+# make data name------------
+import re
+
+
+def make_data_id(language, article, start_date, end_date):
+    safe_article = article.lower()
+
+    # Replace Cyrillic characters with a simple generic topic name
+    # for filenames/data IDs.
+    transliteration = {
+        "а": "a", "б": "b", "в": "v", "г": "h", "ґ": "g",
+        "д": "d", "е": "e", "є": "ie", "ж": "zh", "з": "z",
+        "и": "y", "і": "i", "ї": "i", "й": "i", "к": "k",
+        "л": "l", "м": "m", "н": "n", "о": "o", "п": "p",
+        "р": "r", "с": "s", "т": "t", "у": "u", "ф": "f",
+        "х": "kh", "ц": "ts", "ч": "ch", "ш": "sh",
+        "щ": "shch", "ь": "", "ю": "iu", "я": "ia",
+        "ё": "io", "ъ": "", "ы": "y", "э": "e",
+    }
+
+    safe_article = "".join(
+        transliteration.get(char, char)
+        for char in safe_article
+    )
+
+    safe_article = re.sub(r"[^a-z0-9]+", "_", safe_article)
+    safe_article = safe_article.strip("_")
+
+    return f"{language}_{safe_article}_{start_date}_{end_date}"
+# -------------------------------
 
 tools = [
     {
@@ -72,25 +110,36 @@ tools = [
       "type": "function",
       "function": {
           "name": "analyze_trend",
-          "description": (
-              "Analyze Wikipedia pageview data and return basic "
-              "trend metrics such as percentage change, average, "
-              "median, maximum, minimum and overall trend."
-          ),
+          "description": "Analyze pageview data previously retrieved by get_pageviews.",
           "parameters": {
               "type": "object",
               "properties": {
-                  "data": {
-                      "type": "string",
-                      "description": (
-                          "JSON string containing the pageview records "
-                          "returned by get_pageviews."
-                      )
+                  "data_id": {
+                      "type": "string"
                   }
               },
-              "required": ["data"],
-          },
-      },
+              "required": [
+                  "data_id"
+              ]
+          }
+      }
+  },
+  {
+      "type": "function",
+      "function": {
+          "name": "create_chart",
+          "description": "Create a chart from pageview data previously retrieved by get_pageviews.",
+          "parameters": {
+              "type": "object",
+              "properties": {
+                  "data_id": {
+                      "type": "string",
+                      "description": "ID of the pageview dataset stored by get_pageviews."
+                  }
+              },
+              "required": ["data_id"]
+          }
+      }
   }
 ]
 
@@ -114,11 +163,17 @@ messages = [
 
 
 response = client.chat.completions.create(
-    model="openrouter/free",
+    model="openrouter/free", # model="qwen/qwen3.8-27b:free",
     messages=messages,
     tools=tools,
 )
+# debug--
+# print("TOOL CALLS:")
+# print(response.choices[0].message.tool_calls)
 
+# print("CONTENT:")
+# print(response.choices[0].message.content)
+# end debug--
 
 message = response.choices[0].message
 
@@ -129,54 +184,151 @@ message = response.choices[0].message
 
 if message.tool_calls:
 
-    messages.append(message)
-
     for tool_call in message.tool_calls:
 
-        if tool_call.function.name == "get_pageviews":
+        tool_name = tool_call.function.name
+        arguments = json.loads(tool_call.function.arguments)
 
-            import json
+        # -----------------------------------------
+        # GET PAGEVIEWS
+        # -----------------------------------------
 
-            arguments = json.loads(tool_call.function.arguments)
+        if tool_name == "get_pageviews":
+
+            language = arguments["language"]
+            article = arguments["article"]
+            start_date = arguments["start_date"]
+            end_date = arguments["end_date"]
 
             result = get_pageviews(
-                language=arguments["language"],
-                article=arguments["article"],
-                start_date=arguments["start_date"],
-                end_date=arguments["end_date"],
+                language,
+                article,
+                start_date,
+                end_date
             )
 
-            # Convert DataFrame to JSON-like text
-            result_text = result.to_json(
-                orient="records",
-                date_format="iso"
+            data_id = make_data_id(
+                language,
+                article,
+                start_date,
+                end_date
             )
 
-            messages.append(
+            data_store[data_id] = result
+            # create chart
+            os.makedirs("outputs", exist_ok=True)
+
+            chart_path = os.path.join(
+                "outputs",
+                f"{data_id}.png"
+            )
+
+            create_chart(
+                result,
+                chart_path
+            )
+            # --
+
+            result_text = json.dumps(
                 {
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": result_text,
-                }
+                    "status": "ok",
+                    "data_id": data_id,
+                    "rows": len(result),
+                    "start_date": result["date"].min().strftime("%Y-%m-%d"),
+                    "end_date": result["date"].max().strftime("%Y-%m-%d"),
+                    "chart_path": chart_path,
+                },
+                ensure_ascii=False
             )
-        elif tool_call.function.name == "analyze_trend":
-              import json
 
-              arguments = json.loads(tool_call.function.arguments)
+        # -----------------------------------------
+        # ANALYZE TREND
+        # -----------------------------------------
 
-              data = pd.read_json(arguments["data"])
+        elif tool_name == "analyze_trend":
 
-              result = analyze_trend(data)
+            data_id = arguments["data_id"]
 
-              result_text = json.dumps(result, ensure_ascii=False)
+            if data_id not in data_store:
+                result_text = json.dumps(
+                    {
+                        "status": "error",
+                        "message": f"Unknown data_id: {data_id}"
+                    },
+                    ensure_ascii=False
+                )
 
-              messages.append(
+            else:
+                data = data_store[data_id]
+
+                result = analyze_trend(data)
+
+                result_text = json.dumps(
+                    result,
+                    ensure_ascii=False
+                )
+
+        # -----------------------------------------
+        # CREATE CHART
+        # -----------------------------------------
+
+        elif tool_name == "create_chart":
+
+          data_id = arguments["data_id"]
+
+          if data_id not in data_store:
+              result_text = json.dumps(
                   {
-                      "role": "tool",
-                      "tool_call_id": tool_call.id,
-                      "content": result_text,
-                  }
+                      "status": "error",
+                      "message": f"Unknown data_id: {data_id}"
+                  },
+                  ensure_ascii=False
               )
+
+          else:
+              data = data_store[data_id]
+
+              os.makedirs("outputs", exist_ok=True)
+
+              output_path = os.path.join(
+                  "outputs",
+                  f"{data_id}.png"
+              )
+
+              result = create_chart(
+                  data,
+                  output_path
+              )
+
+              result_text = json.dumps(
+                  {
+                      "status": "ok",
+                      "data_id": data_id,
+                      "chart_path": result
+                  },
+                  ensure_ascii=False
+              )
+        # -----------------------------------------
+        # UNKNOWN TOOL
+        # -----------------------------------------
+
+        else:
+
+            result_text = json.dumps(
+                {
+                    "status": "error",
+                    "message": f"Unknown tool: {tool_name}"
+                },
+                ensure_ascii=False
+            )
+
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": result_text,
+            }
+        )
 
 
     # --------------------------------------------------
@@ -184,10 +336,13 @@ if message.tool_calls:
     # --------------------------------------------------
 
     final_response = client.chat.completions.create(
-        model="openrouter/free",
+        model="openrouter/free", # model="qwen/qwen3.8-27b:free", 
         messages=messages,
     )
-
+    # debug--
+    # print("\nFINAL RESPONSE OBJECT:")
+    # print(final_response.choices[0].message)
+    # end debug--
     print("\nAgent:\n")
     print(final_response.choices[0].message.content)
 

@@ -19,6 +19,7 @@ Use this skill to retrieve Wikipedia pageview data and analyze interest in a top
 6. Base conclusions about trends only on retrieved data and tool results.
 7. Do not invent pageview values or calculated metrics.
 8. Mention important limitations when interpreting pageviews.
+9. Use `create_chart` when a visualization is requested or useful for communicating the results.
 
 ## Data source
 
@@ -49,3 +50,19 @@ Analyzes retrieved pageview data and returns basic metrics including:
 - maximum and minimum daily pageviews and their dates.
 
 Use `analyze_trend` only on data returned by `get_pageviews`.
+
+### create_chart
+
+Creates a line chart from Wikipedia pageview data and saves it as a PNG image.
+
+Use `create_chart` when the user asks for a visualization or when a chart would help communicate the results.
+
+The tool requires:
+- pageview data returned by `get_pageviews`;
+- an output file path.
+
+The chart should show:
+- date on the X-axis;
+- daily pageviews on the Y-axis.
+
+Do not invent or modify pageview values before creating the chart.
