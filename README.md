@@ -145,3 +145,14 @@ This project resulted in a minimal working Wikipedia analysis skill that can ret
 The main goal was not to build a complete production system, but to learn how an Agent Skill is structured, how Python functions can be exposed to an agent as tools, how data can be passed between operations, and how an agent interacts with those tools.
 
 The project also provided practical experience with model-specific tool-calling behavior, debugging agent workflows, testing in Google Colab, and packaging the result as a GitHub repository.
+
+## 8. Resources and Tools
+
+The following tools were used during the development of the project:
+
+* **ChatGPT** — for analyzing the assignment, exploring the Agent Skills concept and related technologies, designing the implementation approach, and developing the main part of the code.
+* **Google Colab** — for writing, running, and testing Python code in an accessible development environment.
+* **Google Gemini** — for troubleshooting minor coding issues, clarifying technical questions, and validating individual implementation details.
+
+This project was also a learning exercise: prior to this assignment, I had not worked with Google Colab, Python-based Agent Skills, or agent tool-calling workflows.
+
